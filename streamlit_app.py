@@ -19,7 +19,7 @@ st.set_page_config(page_title="Smart Flow", layout="centered")
 # Load shared CSS and footer
 load_css()
 
-st.title("🧠 Smart Flow")
+st.title("🧠 Smart Flow (Old Catalogue)")
 st.markdown("""
 Drop your Excel report below and let the magic begin. ✨.
 """)
