@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
-# Assuming style_utils.py exists and contains the necessary functions
-from style_utils import load_css, load_footer
+from style_utils import load_css, load_footer # Import the shared functions
 import streamlit.components.v1 as components
 
 # Initialize session state for DataFrames
@@ -86,7 +85,6 @@ if uploaded_file:
         output_df['Price'] = df['netamt']
         output_df['Hrs'] = ''
         output_df['Under Process'] = df['availeddatetime'].apply(lambda x: 'UNDER PROCESS' if pd.notnull(x) else 'SAMPLE PENDING')
-        output_df.loc[output_df['Price'] == 0, 'Payment'] = '-'
 
         # Get min and max dates for the header
         valid_dates = pd.to_datetime(df['billdate'].dropna(), errors='coerce')
@@ -101,108 +99,62 @@ if uploaded_file:
         if uploaded_payment_file:
             try:
                 payment_df = pd.read_excel(uploaded_payment_file, skiprows=9, header=None)
+                if payment_df.shape[1] < 19:
+                    raise ValueError("Payment file must have at least 19 columns (0-18).")
+                payment_df = payment_df.iloc[:, [5, 17, 18]]
+                payment_df = payment_df.dropna(subset=[5]).reset_index(drop=True)
+                payment_df[17] = pd.to_numeric(payment_df[17], errors='coerce')
+                payment_df[18] = pd.to_numeric(payment_df[18], errors='coerce')
 
-                if payment_df.shape[1] < 20:
-                    st.warning("⚠️ The uploaded payment file does not have enough columns to be processed. Proceeding without payment data.")
-                else:
-                    payment_df = payment_df.iloc[:, [5, 17, 18, 19]]
-                    payment_df = payment_df.dropna(subset=[5]).reset_index(drop=True)
-                    payment_df[17] = pd.to_numeric(payment_df[17], errors='coerce')
-                    payment_df[18] = pd.to_numeric(payment_df[18], errors='coerce')
-                    payment_df[19] = pd.to_numeric(payment_df[19], errors='coerce')
+                payment_map = {}
+                for _, row in payment_df.iterrows():
+                    name = str(row[5]).strip().upper()
+                    col_17 = row[17]
+                    col_18 = row[18]
+                    if pd.notnull(col_17) and col_17 > 0:
+                        payment_map[name] = 'CASH'
+                    elif pd.notnull(col_18) and col_18 > 0:
+                        payment_map[name] = 'BANK'
+                    else:
+                        payment_map[name] = 'CARD'
 
-                    payment_map = {}
-                    for _, row in payment_df.iterrows():
-                        name = str(row[5]).strip().upper()
-                        col_17 = row[17]
-                        col_18 = row[18]
-                        col_19 = row[19]
-                        if pd.notnull(col_17) and col_17 > 0:
-                            payment_map[name] = 'CASH'
-                        elif pd.notnull(col_18) and col_18 > 0:
-                            payment_map[name] = 'BANK'
-                        elif pd.notnull(col_19) and col_19 > 0:
-                            payment_map[name] = 'CARD'
-                        else:
-                            payment_map[name] = '-'
+                output_df['Payment'] = output_df['Name'].str.strip().str.upper().map(payment_map).fillna('CARD')
 
-                    output_df['Payment'] = output_df['Name'].str.strip().str.upper().map(payment_map).fillna('CARD')
-
-                    unmatched_names_df = output_df.copy()
-                    unmatched_names_df['Payment'] = unmatched_names_df['Name'].str.strip().str.upper().map(payment_map)
-                    
-                    unmatched_names_df = unmatched_names_df[
-                        ~((unmatched_names_df['Package'].str.contains('BODY COMPOSITION ANALYSIS', case=False, na=False)) & (unmatched_names_df['Price'] == 0))
-                    ]
-                    
-                    unmatched_names = set(unmatched_names_df['Name'].str.strip().str.upper()) - set(payment_map.keys())
-                    
-                    if unmatched_names:
-                        st.write("Unmatched Names (Filled as CARD):", list(unmatched_names))
-                        st.write("Unmatched Names Count:", len(unmatched_names))
+                # Show unmatched names if they exist
+                unmatched_names = set(output_df['Name'].str.strip().str.upper()) - set(payment_map.keys())
+                if unmatched_names:
+                    st.write("Unmatched Names (Filled as CARD):", list(unmatched_names))
+                    st.write("Unmatched Names Count:", len(unmatched_names))
 
             except Exception as e:
                 st.warning(f"⚠️ Error processing payment file: {e}. Proceeding without payment data.")
 
-        # --- NEW AMENDMENT ---
-        # Set 'Payment' to '-' for 'BODY COMPOSITION ANALYSIS' package
-        output_df.loc[output_df['Package'].str.contains('BODY COMPOSITION ANALYSIS', case=False, na=False), 'Payment'] = '-'
-
         # Stage 2: Calculate hours
         hours_dict = {
             "UAE National Pre-employment": "72hrs", "Wellness Package - Premium": "96hrs",
-            "Food Intolerance Test": "72hrs", "Respiratory Allergy Test": "48hrs",
+            "Food Intolerance Test": "96hrs", "Respiratory Allergy Test": "48hrs",
             "Body Composition Analysis Test": "0", "ECG": "0","MOVEMENT ASSESSMENT": "0",
             "Wellness Package - Enhanced": "72hrs", "Wellness Package - Standard": "36hrs",
             "Lipid Profile Test": "24hrs", "Food Allergy Test": "48hrs",
             "Female Hormone Profile": "48hrs", "Gut Health": "6 Weeks",
             "Smart DNA - Nutrition Package": "6 Weeks",
-            "SMART DNA - ACNE PACKAGE": "6 Weeks",
+            "Smart DNA – Acne Profile": "6 Weeks",
             "Smart DNA – Hair Loss Profile": "6 Weeks",
             "Smart DNA - Age Well Package": "6 Weeks",
             "ACTIVE PACKAGE": "96hrs",
             "ATHLETE PACKAGE": "96hrs",
-            "MOVEMENT ASSESSMENT": "0",
-            "BODY COMPOSITION ANALYSIS": "0",
-            # FIX: Updated package name to remove apostrophe
-            "PREMIUM PLUS MENS HEALTH SCREENING": "72hrs", 
-            "GUT MICROBIOME PACKAGE": "6 Weeks",
-            "PREMIUM HEALTH SCREENING": "72hrs",
-            "STANDARD HEALTH SCREENING": "48hrs",
-            # FIX: Updated package name to remove apostrophe
-            "PREMIUM PLUS WOMENS HEALTH SCREENING": "72hrs", 
-            "CLINICAL DIETITIAN PACKAGE - SINGLE": "0"
+            "MOVEMENT ASSESSMENT": "0"
         }
 
         def get_hours(package_name):
             if not isinstance(package_name, str): return None
-            if "SMART DNA" in package_name.upper(): return "6 Weeks"
+            if "SMART DNA - " in package_name: return "6 Weeks"
             if "CONSULTATION" in package_name.upper(): return "0"
             if "MOVEMENT ASSESSMENT" in package_name.upper(): return "0"
             if "WOMENS COMPREHENSIVE HEALTH SCREENING" in package_name.upper(): return "96hrs"
             if "ACTIVE PACKAGE" in package_name.upper(): return "96hrs"
             if "ATHLETE PACKAGE" in package_name.upper(): return "96hrs"
-            if "SEASONAL INFLUENZA" in package_name.upper(): return "0"
-            if "BODY COMPOSITION ANALYSIS" in package_name.upper(): return "0"
-            # FIX: Updated package name to remove apostrophe
-            if "PREMIUM PLUS MENS HEALTH SCREENING" in package_name.upper(): return "72hrs"
-            if "GUT MICROBIOME PACKAGE" in package_name.upper(): return "6 Weeks"
-            if "PREMIUM HEALTH SCREENING" in package_name.upper(): return "72hrs"
-            if "STANDARD HEALTH SCREENING" in package_name.upper(): return "48hrs"
-            if "HEPATITIS B VACCINATION" in package_name.upper(): return "0"
-            # FIX: Updated package name to remove apostrophe
-            if "PREMIUM PLUS WOMENS HEALTH SCREENING" in package_name.upper(): return "72hrs"
-            if "CLINICAL DIETITIAN PACKAGE - SINGLE" in package_name.upper(): return "0"
-            if "CLINICAL DIETITIAN PACKAGE BUNDLE (X3)" in package_name.upper(): return "0"
-            if "CLINICAL DIETITIAN PACKAGE BUNDLE (X5)" in package_name.upper(): return "0"
-            if "FOOD ALLERGY & INTOLERANCE TEST BUNDLE" in package_name.upper(): return "96hrs"
-            if "UAE NATIONAL PRE-EMPLOYMENT HEALTH SCREENING" in package_name.upper(): return "72hrs"
-            if "FOOD INTOLERANCE TEST" in package_name.upper(): return "96hrs"
-            if "SEASONAL FLU VACCINATION" in package_name.upper(): return "0"
-            if "BCA - DISCOUNTED" in package_name.upper(): return "0"
-            if "HEALTHY HEART PACKAGE" in package_name.upper(): return "72hrs"
-            if "LIPID TEST" in package_name.upper(): return "48hrs"
-            if "TRAVEL FIT ASSESSMENT" in package_name.upper(): return "0"
+            if "SEASONAL INFLUENZA" in package_name.upper(): return "0" 
             for key in hours_dict:
                 if key in package_name:
                     return hours_dict[key]
@@ -213,27 +165,27 @@ if uploaded_file:
 
         # Stage 3: Pivot tables (DR 1 - QLAB)
         mapping_pivot = {
-            "Wellness Package - Standard": "Standard Health Screening",
-            "Wellness Package - Premium": "Premium Health Screening",
-            "Respiratory Allergy Test (Add On)": "Respiratory Allergy Test",
-            "Food Allergy Test (Add On)": "Food Allergy Test",
-            "Food Intolerance Test (Add On)": "Food Intolerance Test",
-            "Lipid Profile Test (Add On with Wellness)": "Lipid Test",
-            "Smart DNA - Age Well Package": "Smart DNA - Age Well Package",
-            "Smart DNA – Hair Loss Profile": "Smart DNA - Hair Loss Package",
-            "Smart DNA – Acne Profile": "Smart DNA - Acne Package",
-            "Womens Comprehensive Health Screening": "Women's Comprehensive Health Package",
-            "Healthy Heart Package": "Healthy Heart Package",
-            "UAE National Pre-employment": "UAE National Pre-Employment Health Screening"
+            "UAE National Pre-employment": "UAE-National Pre-Employment Test",
+            "Wellness Package - Premium": "Premium Package",
+            "Food Intolerance Test (Stand Alone)": "Food Intolerance",
+            "Respiratory Allergy Test (Add On)": "Respiratory Allergy",
+            "Body Composition Analysis Test (Add On)": "Body Composition Analysis Test (Add On)",
+            "ECG and Doctor Consult (Stand Alone)": "ECG and Doctor Consult (Stand Alone)",
+            "Wellness Package - Enhanced": "Enhanced Package",
+            "Wellness Package - Standard": "Standard Package",
+            "Lipid Profile Test (Add On with Wellness)": "Lipid Profile",
+            "Food Allergy Test (Add On)": "Food Allergy",
+            "Female Hormone Profile (Add On with Wellness)": "Female Hormone Profile",
+            "Food Intolerance Test (Add On)": "Food Intolerance",
+            "Smart DNA - Age Well Package": "Age-Well"
         }
         packages_pivot = [
-            'Standard Health Screening', 'Premium Health Screening', 'Premium PLUS Womens Health Screening',
-            'Premium PLUS Mens Health Screening', 'Respiratory Allergy Test', 'Food Allergy Test',
-            'Food Intolerance Test', 'Food Allergy & Intolerance Test Bundle', 'Coeliac Test',
-            'Cortisol Test', 'Lipid Test', 'Smart DNA - Nutrition Package', 'Smart DNA - Age Well Package',
-            'Smart DNA - Hair Loss Package', 'Smart DNA - Acne Package', 'Sports Health Screening Package',
-            'Women\'s Comprehensive Health Package', 'Healthy Heart Package',
-            'UAE National Pre-Employment Health Screening', 'Student Pre-Employment Health Screening'
+            'Standard Package', 'Enhanced Package', 'Premium Package', 'Lipid Profile',
+            'Food Allergy', 'Food Intolerance', 'Respiratory Allergy', 'Female Hormone Profile',
+            'Mag & Zinc', 'Coeliac Profile Test', 'Active Package',
+            'Womens Comprehensive Health Screening', 'Healthy Heart Package', 'Right Fit',
+            'Athlete Package', 'Nutrition', 'UAE-National Pre-Employment Test', 'Age-Well',
+            'Acne Profile', 'Hair Loss'
         ]
         locations = ['CITY WALK', 'INDEX', 'DKP']
 
@@ -265,109 +217,91 @@ if uploaded_file:
         pivot_df = pivot_df.reindex(columns=['CITY WALK', 'INDEX', 'DKP', 'Total'])
 
         # Stage 4: Unique Patients (DR 1 - SS)
-        # AMENDMENT START - New logic for handling BCA packages based on price
-        
-        # Define the packages list with the corrected names and the new row
         packages_unique = [
-            'Standard Health Screening', 'Premium Health Screening', 'Premium PLUS Womens Health Screening',
-            'Premium PLUS Mens Health Screening', 'Respiratory Allergy Test', 'Food Allergy Test',
-            'Food Intolerance Test', 'Food Allergy & Intolerance Test Bundle', 'Coeliac Test',
-            'Dietitian Panel WITH Coeliac - INTERNAL REFERRAL',
-            'Cortisol Test', 'Lipid Test',
-            'Gut Microbiome Package', 'Body Composition Analysis', 'BCA - Free', 'ECG & Consult',
-            'Smart DNA - Nutrition Package', 'Smart DNA - Age Well Package', 'Smart DNA - Hair Loss Package',
-            'Smart DNA - Acne Package', 'Doctor Consultation', 'Clinical Dietitian Package - Single',
-            'Clinical Dietitian Package Bundle (x3)', 'Clinical Dietitian Package Bundle (x5)',
-            'Sports Health Screening Package', 'Women\'s Comprehensive Health Package', 'Healthy Heart Package',
-            'UAE National Pre-Employment Health Screening', 'Student Pre-Employment Health Screening',
-            'Travel Fit Assessment', 'Seasonal Flu Vaccination', 'Hepatitis B Vaccination'
+            'Standard Package', 'Enhanced Package', 'Premium Package', 'Lipid Profile',
+            'Food Allergy', 'Food Intolerance', 'Respiratory Allergy', 'Female Hormone Profile',
+            'Mag & Zinc', 'Coeliac Profile Test', 'Active Package', 'Athlete Package',
+            'BCA', 'Right Fit', 'ECG', 'Pulmonary Function Test',
+            'UAE-National Pre-Employment Test', 'Travel Fit Assessment', 'Movement Assessment',
+            'H&U Vaccination', 'Influenza Vaccination', 'Healthy Heart',
+            'Womens Comprehensive Health Screening', 'Gym Partnership Package - Athlete Plus',
+            'Nutrition', 'Age-Well', 'Acne Profile', 'Hair Loss', 'GUT Health', 'OPC'
         ]
 
-        temp_df = output_df.copy()
+        mapping_unique = {
+            "UAE National Pre-employment": "UAE-National Pre-Employment Test",
+            "Wellness Package - Premium": "Premium Package",
+            "Food Intolerance Test (Stand Alone)": "Food Intolerance",
+            "Food Intolerance Test (Add On)": "Food Intolerance",
+            "Respiratory Allergy Test (Add On)": "Respiratory Allergy",
+            "Body Composition Analysis Test": "BCA",
+            "Body Composition Analysis Test (Add On)": "BCA",
+            "ECG and Doctor Consult (Stand Alone)": "ECG",
+            "Wellness Package - Enhanced": "Enhanced Package",
+            "Wellness Package - Standard": "Standard Package",
+            "Lipid Profile Test (Add On with Wellness)": "Lipid Profile",
+            "Food Allergy Test (Add On)": "Food Allergy",
+            "Female Hormone Profile (Add On with Wellness)": "Female Hormone Profile",
+            "Smart DNA - Age Well Package": "Age-Well",
+            "Gut Health": "GUT Health",
+            "Healthy Heart Package": "Healthy Heart",
+            "Womens Comprehensive Health Screening": "Womens Comprehensive Health Screening",
+            "Athlete Package": "Athlete Package",
+            "Right Fit": "Right Fit",
+            "Smart DNA - Nutrition Package": "Nutrition",
+            "Acne Profile": "Acne Profile",
+            "Hair Loss": "Hair Loss",
+            "Coeliac Profile Test": "Coeliac Profile Test",
+            "Active Package": "Active Package",
+            "Mag & Zinc": "Mag & Zinc",
+            "Pulmonary Function Test": "Pulmonary Function Test",
+            "Travel Fit Assessment": "Travel Fit Assessment",
+            "Movement Assessment": "Movement Assessment",
+            "H&U Vaccination": "H&U Vaccination",
+            "SEASONAL INFLUENZA": "Influenza Vaccination",
+            "Gym Partnership Package - Athlete Plus": "Gym Partnership Package - Athlete Plus",
+            "CLINICAL DIETITIAN CONSULTATION - 30 MINS": "OPC",
+            "Outpatient Consultation - 30 Mins": "OPC"
+        }
 
-        # FIX: New logic for BCA counting
-        def get_standardized_package(row):
-            pkg_name = str(row['Package']).strip().upper()
-            price = row['Price']
-            
-            # Special case for BCA packages
-            if 'BODY COMPOSITION ANALYSIS' in pkg_name or 'BCA - DISCOUNTED' in pkg_name:
-                # If price is 0, it's a free BCA
-                if price == 0:
-                    return 'BCA - Free'
-                # If price is > 0, it's a regular BCA
-                else:
-                    return 'Body Composition Analysis'
-
-            # General mappings
-            mapping_unique = {
-                "WELLNESS PACKAGE - STANDARD": "Standard Health Screening",
-                "WELLNESS PACKAGE - PREMIUM": "Premium Health Screening",
-                "RESPIRATORY ALLERGY TEST (STAND ALONE)": "Respiratory Allergy Test",
-                "FOOD ALLERGY TEST (STAND ALONE)": "Food Allergy Test",
-                "FOOD INTOLERANCE TEST (STAND ALONE)": "Food Intolerance Test",
-                "COELIAC PROFILE TEST (STAND ALONE)": "Coeliac Test",
-                "LIPID PROFILE TEST (STAND ALONE)": "Lipid Test",
-                "GUT HEALTH (STAND ALONE)": "Gut Microbiome Package",
-                "ECG AND DOCTOR CONSULT (STAND ALONE)": "ECG & Consult",
-                "SMART DNA - NUTRITION PACKAGE": "Smart DNA - Nutrition Package",
-                "SMART DNA - AGE WELL PACKAGE": "Smart DNA - Age Well Package",
-                "SMART DNA – HAIR LOSS PROFILE": "Smart DNA - Hair Loss Package",
-                "SMART DNA – ACNE PACKAGE": "Smart DNA - Acne Package",
-                "OUTPATIENT CONSULTATION - 30 MINS": "Doctor Consultation",
-                "CLINICAL DIETICIAN PROFILE TEST": "Clinical Dietitian Package - Single",
-                "WOMENS COMPREHENSIVE HEALTH SCREENING": "Women's Comprehensive Health Package",
-                "HEALTHY HEART PACKAGE": "Healthy Heart Package",
-                "UAE NATIONAL PRE-EMPLOYMENT": "UAE National Pre-Employment Health Screening",
-                "TRAVEL FIT ASSESSMENT": "Travel Fit Assessment",
-                "SEASONAL INFLUENZA (STAND ALONE)": "Seasonal Flu Vaccination",
-                "PREMIUM PLUS MENS HEALTH SCREENING": "Premium PLUS Mens Health Screening",
-                "PREMIUM PLUS WOMENS HEALTH SCREENING": "Premium PLUS Womens Health Screening",
-                "GUT MICROBIOME PACKAGE": "Gut Microbiome Package",
-                "DIETITIAN PANEL WITH COELIAC - INTERNAL REFERRAL": "Dietitian Panel WITH Coeliac - INTERNAL REFERRAL",
-            }
-
-            # Check if the package name is in the mapping dictionary
-            if pkg_name in mapping_unique:
-                return mapping_unique[pkg_name]
-            
-            # Check for substring matches in the packages_unique list
-            for pkg in packages_unique:
-                if pkg.upper() in pkg_name:
-                    return pkg
-            
-            return None
-
-        # Apply the new mapping logic
-        temp_df['Standardized Package'] = temp_df.apply(get_standardized_package, axis=1)
-
-        # Filter out rows where package could not be matched
-        temp_df = temp_df[temp_df['Standardized Package'].notna()]
-        
-        # Create an empty DataFrame to store the unique patient counts
         unique_patients_pivot = pd.DataFrame(0, index=packages_unique, columns=locations)
 
-        # Group and count unique patients for all packages
-        grouped_data = temp_df.groupby(['Standardized Package', 'Location'])['Name'].nunique()
+        def match_package(service_name):
+            if not isinstance(service_name, str):
+                return None
+            service_name = service_name.strip().upper()
+            for key, value in mapping_unique.items():
+                if key.upper() == service_name:
+                    return value
+            for key, value in mapping_unique.items():
+                if key.upper() in service_name:
+                    return value
+            for pkg in packages_unique:
+                if pkg.upper() in service_name:
+                    return pkg
+            return None
 
-        # Populate the unique_patients_pivot DataFrame from the grouped data
-        for (package, location), count in grouped_data.items():
-            if package in unique_patients_pivot.index:
-                if 'CITY WALK' in location.upper():
-                    unique_patients_pivot.at[package, 'CITY WALK'] += count
-                elif 'DUBAI KNOWLEDGE PARK' in location.upper() or 'DKP' in location.upper():
-                    unique_patients_pivot.at[package, 'DKP'] += count
-                elif 'INDEX TOWER' in location.upper() or 'INDEX' in location.upper():
-                    unique_patients_pivot.at[package, 'INDEX'] += count
-        
-        # Add Total column
+        for _, row in output_df.iterrows():
+            package_value = match_package(row['Package'])
+            location_value = str(row['Location']).strip().upper()
+            if package_value in packages_unique:
+                if 'CITY WALK' in location_value:
+                    unique_patients_pivot.at[package_value, 'CITY WALK'] += 1
+                elif 'DUBAI KNOWLEDGE PARK' in location_value or 'DKP' in location_value:
+                    unique_patients_pivot.at[package_value, 'DKP'] += 1
+                elif 'INDEX TOWER' in location_value or 'INDEX' in location_value:
+                    unique_patients_pivot.at[package_value, 'INDEX'] += 1
+
+        # Add Total column for packages
         unique_patients_pivot['Total'] = unique_patients_pivot.sum(axis=1)
 
-        # Add Total row
+        # Add Total row for packages
         unique_patients_pivot.loc['Total'] = unique_patients_pivot.sum(axis=0)
 
-        # Add a row for total unique patients per location
-        unique_patients_total_row = pd.Series(index=locations + ['Total'], dtype=int)
+        
+
+        # Add Unique Patients row after Total (not included in Total calculation)
+        unique_patients_row = pd.Series(index=locations + ['Total'], dtype=int)
         for location in locations:
             if location == 'CITY WALK':
                 mask = output_df['Location'].str.contains('CITY WALK', case=False, na=False)
@@ -375,22 +309,31 @@ if uploaded_file:
                 mask = output_df['Location'].str.contains('DUBAI KNOWLEDGE PARK|DKP', case=False, na=False)
             elif location == 'INDEX':
                 mask = output_df['Location'].str.contains('INDEX TOWER|INDEX', case=False, na=False)
-            else:
-                continue
-            
             unique_count = output_df[mask]['Name'].nunique()
-            unique_patients_total_row[location] = unique_count
-        
-        unique_patients_total_row['Total'] = unique_patients_total_row[locations].sum()
-        unique_patients_pivot.loc['Unique Patients'] = unique_patients_total_row
-        
+            unique_patients_row[location] = unique_count
+        unique_patients_row['Total'] = unique_patients_row[locations].sum()
+
+        # Append Unique Patients row
+        unique_patients_pivot.loc['Unique Patients'] = unique_patients_row
+
         unique_patients_pivot = unique_patients_pivot.reindex(columns=['CITY WALK', 'INDEX', 'DKP', 'Total'])
-        # AMENDMENT END
+        # add beautician 
+
+         # Prepare Excel formula for 4th column (index 3)
+        beautician_excel_row = unique_patients_pivot.shape[0] + 3  # 1-based + header + column names
+        
+        beautician_row = pd.DataFrame(
+            [['N/A', 'N/A', 0, f'=D{beautician_excel_row}']],
+            columns=unique_patients_pivot.columns,
+            index=['Beautician']
+        )
+        
+        # Add Beautician at the end
+        unique_patients_pivot = pd.concat([unique_patients_pivot, beautician_row])
 
         # Stage 5: Filtered table for QLAB
         stage4_df = output_df.copy()
-        # FIX: Added filter for 'BCA - DISCOUNTED'
-        stage4_df = stage4_df[~stage4_df['Package'].str.contains('GUT HEALTH|CONSULTATION|GUT MICROBIOME PACKAGE|BCA - DISCOUNTED', case=False, na=False)]
+        stage4_df = stage4_df[~stage4_df['Package'].str.contains('GUT HEALTH|CONSULTATION', case=False, na=False)]
         stage4_df = stage4_df[stage4_df['Hrs'] != '0']
         stage4_df['No'] = range(1, len(stage4_df) + 1)
         stage4_df = stage4_df.fillna('')
@@ -448,7 +391,7 @@ if uploaded_file:
                 """Adjust column widths based on content length."""
                 for col_num, column in enumerate(df.columns, start_col):
                     max_length = max(
-                        len(str(column)) + 2,
+                        len(str(column)) + 2,  # Column header length
                         max((len(str(val)) for val in df[column]), default=0) + 2
                     )
                     if index and col_num == start_col:
@@ -485,16 +428,10 @@ if uploaded_file:
                 worksheet_ss_pivot.write(1, col_num + 1, value, second_row_format)
             for row_num in range(len(unique_patients_pivot)):
                 for col_num, value in enumerate(unique_patients_pivot.iloc[row_num]):
-                    # Check if the value is an Excel formula string
-                    if isinstance(value, str) and value.startswith('='):
-                        format_to_use = total_format
-                    else:
-                        format_to_use = total_format if (row_num >= len(unique_patients_pivot) - 2 or col_num == len(unique_patients_pivot.columns) - 1) else record_format
+                    format_to_use = total_format if (row_num >= len(unique_patients_pivot) - 3 or col_num == len(unique_patients_pivot.columns) - 1) else record_format
                     worksheet_ss_pivot.write(row_num + 2, col_num + 1, value, format_to_use)
-                
                 format_to_use = total_format if row_num >= len(unique_patients_pivot) - 2 else second_row_format
                 worksheet_ss_pivot.write(row_num + 2, 0, unique_patients_pivot.index[row_num], format_to_use)
-
 
             # Formatting for DR 2
             worksheet = writer.sheets['DR 2']
