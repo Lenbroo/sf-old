@@ -19,17 +19,6 @@ st.set_page_config(page_title="Smart Flow", layout="centered")
 # Load shared CSS and footer
 load_css()
 
-components.html(
-    """
-    <script>
-      const meta = document.createElement('meta');
-      meta.name = "color-scheme";
-      meta.content = "light dark";
-      document.head.appendChild(meta);
-    </script>
-    """,
-    height=0,
-)
 st.title("🧠 Smart Flow")
 st.markdown("""
 Drop your Excel report below and let the magic begin. ✨.
